@@ -201,6 +201,35 @@ void main() {
     });
   });
 
+  group('Evaluator with no WordPress installation', () {
+    test('a site with no WordPress install gets one distinct issue instead '
+        'of generic CMS version and plugin fetch warnings', () {
+      final site = _wordpressSite();
+      site.wordPressNotInstalled = true;
+      site.pluginFetchFailed = true;
+      site.cmsStability = Site.cmsNotInstalled;
+
+      Evaluator().evaluateSite(site);
+
+      expect(site.issues, hasLength(1));
+      expect(site.issues.single.severity, 'warning');
+      expect(site.issues.single.relatedField, 'cms_version_status');
+      expect(site.issues.single.description,
+          'No WordPress installation found on the live environment');
+      expect(site.toJson()['cms_version_status'], 'not installed');
+    });
+
+    test('an installed WordPress site is unaffected', () {
+      final site = _wordpressSite();
+      site.cmsStability = 'outdated';
+
+      Evaluator().evaluateSite(site);
+
+      expect(site.issues, hasLength(1));
+      expect(site.issues.single.description, 'CMS Version');
+    });
+  });
+
   group('Evaluator._evaluateDrupal', () {
     test('Drupal sites get an explicit "not evaluated" warning', () {
       final site = Site(cmsName: 'drupal', pantheonName: 'drupal-site');

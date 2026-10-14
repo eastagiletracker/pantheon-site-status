@@ -113,8 +113,14 @@ class SinfoManager {
         if (url.isEmpty) url = null;
       }
 
-      site.cmsVersion =
-          await pantheon.fetchWordPressVersion(site.pantheonName, url: url);
+      try {
+        site.cmsVersion =
+            await pantheon.fetchWordPressVersion(site.pantheonName, url: url);
+      } on WordPressNotInstalledException {
+        site.wordPressNotInstalled = true;
+        site.cmsStability = Site.cmsNotInstalled;
+        return site;
+      }
       site.cmsStability =
           await wordPress.fetchVersionStability(site.cmsVersion);
 

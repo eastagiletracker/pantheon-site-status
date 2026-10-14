@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:sinfo/models/site.dart';
+import 'package:sinfo/models/wordpress_plugin.dart';
+import 'package:sinfo/pantheon.dart';
 import 'package:sinfo/sinfo_manager.dart';
 import 'package:test/test.dart';
 
@@ -29,4 +32,76 @@ void main() {
       );
     });
   });
+
+  group('SinfoManager with a site that has no WordPress installation', () {
+    test('skips the remaining WordPress fetches and reports one distinct '
+        'issue', () async {
+      final dir = await Directory.systemTemp.createTemp('sinfo_test');
+      addTearDown(() => dir.delete(recursive: true));
+      final pantheon = _NoWordPressPantheon();
+      final manager = SinfoManager(resultsPath: '${dir.path}/sites.json')
+        ..pantheon = pantheon;
+
+      final file = await manager.sitesFile();
+
+      expect(pantheon.pluginFetches, 0);
+      final payload =
+          json.decode(await file!.readAsString()) as Map<String, dynamic>;
+      final site = (payload['sites'] as List).single as Map<String, dynamic>;
+      expect(site['cms_version'], '');
+      expect(site['cms_version_status'], 'not installed');
+      expect(site['issues'], [
+        {
+          'level': 'warning',
+          'related_field': 'cms_version_status',
+          'description':
+              'No WordPress installation found on the live environment',
+          'url': '',
+        }
+      ]);
+    });
+  });
+}
+
+/// Pantheon stand-in for one WordPress site whose live environment has no
+/// WordPress installation.
+class _NoWordPressPantheon extends Pantheon {
+  int pluginFetches = 0;
+
+  _NoWordPressPantheon() : super(pantheonOrgId: 'org');
+
+  @override
+  Future<bool> isTerminusInstalled() async => true;
+
+  @override
+  Future<List<Site>> fetchSites() async => [
+        Site(
+          cmsName: 'wordpress',
+          pantheonName: 'empty-site',
+          pantheonPlanName: 'Performance Small',
+        ),
+      ];
+
+  @override
+  Future<String> fetchPhpVersion(String siteName) async => '8.4';
+
+  @override
+  Future<String> fetchLiveUrl(String siteName) async => 'https://example.com';
+
+  @override
+  Future<String> fetchNewRelicStatus(String siteName) async => 'active';
+
+  @override
+  Future<String> fetchUpstreamStatus(String siteName) async => 'current';
+
+  @override
+  Future<String> fetchWordPressVersion(String siteName, {String? url}) async =>
+      throw WordPressNotInstalledException(siteName);
+
+  @override
+  Future<List<WordPressPlugin>?> fetchWordPressPlugins(String siteName,
+      {String? url}) async {
+    pluginFetches++;
+    return [];
+  }
 }

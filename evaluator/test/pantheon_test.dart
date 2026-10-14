@@ -14,8 +14,11 @@ class _FakeTerminus {
       results[calls++];
 }
 
-ProcessResult _result(int exitCode, String stdout) =>
-    ProcessResult(0, exitCode, stdout, '');
+ProcessResult _result(int exitCode, String stdout, [String stderr = '']) =>
+    ProcessResult(0, exitCode, stdout, stderr);
+
+const _noWordPress = 'Error: This does not seem to be a WordPress '
+    'installation.\nPass --path=`path/to/wordpress` or run `wp core download`.';
 
 Pantheon _pantheon(_FakeTerminus fake) => Pantheon(
       pantheonOrgId: 'org',
@@ -84,6 +87,59 @@ void main() {
       ]);
 
       expect(await _pantheon(fake).fetchWordPressPlugins('site'), isNull);
+    });
+  });
+
+  group('Pantheon with no WordPress installation', () {
+    test('the core version fetch throws WordPressNotInstalledException '
+        'without retrying', () async {
+      // Regression coverage: a site Pantheon lists as WordPress but whose
+      // live environment has no WordPress install (PRD 07) was retried
+      // with backoff and then looked like any other failed fetch.
+      final fake = _FakeTerminus([_result(1, '', _noWordPress)]);
+
+      await expectLater(
+        _pantheon(fake).fetchWordPressVersion('site'),
+        throwsA(isA<WordPressNotInstalledException>()
+            .having((e) => e.siteName, 'siteName', 'site')),
+      );
+      expect(fake.calls, 1);
+    });
+
+    test('the error is recognized when WP-CLI writes it to stdout', () async {
+      final fake = _FakeTerminus([_result(1, _noWordPress)]);
+
+      await expectLater(
+        _pantheon(fake).fetchWordPressVersion('site'),
+        throwsA(isA<WordPressNotInstalledException>()),
+      );
+      expect(fake.calls, 1);
+    });
+
+    test('other core version failures still return an empty value', () async {
+      final fake = _FakeTerminus([
+        _result(1, '', 'Error: Error establishing a database connection.'),
+        _result(1, '', 'Error: Error establishing a database connection.'),
+        _result(1, '', 'Error: Error establishing a database connection.'),
+      ]);
+
+      expect(await _pantheon(fake).fetchWordPressVersion('site'), '');
+      expect(fake.calls, 3);
+    });
+
+    test('the plugin fetch is not retried and returns null', () async {
+      final fake = _FakeTerminus([_result(1, '', _noWordPress)]);
+
+      expect(await _pantheon(fake).fetchWordPressPlugins('site'), isNull);
+      expect(fake.calls, 1);
+    });
+
+    test('the multisite domain lookup is not retried and returns empty',
+        () async {
+      final fake = _FakeTerminus([_result(1, '', _noWordPress)]);
+
+      expect(await _pantheon(fake).fetchMultisitePrimaryDomain('site'), '');
+      expect(fake.calls, 1);
     });
   });
 }

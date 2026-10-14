@@ -90,6 +90,15 @@ class Evaluator {
 
   /// Evaluate a WordPress site and record issues in [site].
   void _evaluateWordPress(Site site) {
+    if (site.wordPressNotInstalled) {
+      site.issues.add(const SiteIssue(
+        severity: 'warning',
+        relatedField: 'cms_version_status',
+        description: 'No WordPress installation found on the live environment',
+      ));
+      return;
+    }
+
     final alert = wordpressAlerts[site.cmsStability] ?? 'warning';
     if (alert != 'okay') {
       site.issues.add(SiteIssue(

@@ -8,6 +8,22 @@ import 'models/wordpress_plugin.dart';
 typedef ProcessRunner = Future<ProcessResult> Function(
     String executable, List<String> arguments);
 
+/// Thrown when WP-CLI reports that a site's live environment has no
+/// WordPress installation at all, even though Pantheon lists the site's
+/// framework as WordPress.
+class WordPressNotInstalledException implements Exception {
+  /// Name of the site with no WordPress installation.
+  final String siteName;
+
+  /// Default constructor.
+  const WordPressNotInstalledException(this.siteName);
+
+  @override
+  String toString() =>
+      'WordPressNotInstalledException: no WordPress installation found '
+      'for $siteName';
+}
+
 /// This class provides easy access in Dart to Pantheon terminus commands.
 class Pantheon {
   /// Pantheon's organization ID for the organization owning the sites.
@@ -63,6 +79,9 @@ class Pantheon {
     for (var attempt = 1;; attempt++) {
       final result = await _runProcess('terminus', args);
       if (result.exitCode == 0 || attempt >= maxAttempts) return result;
+      // A missing WordPress install fails the same way every time, so
+      // retrying it only adds backoff delay to every daily run.
+      if (_isMissingWordPress(result)) return result;
 
       stderr.writeln('Warning: `terminus ${args.join(' ')}` failed for '
           '$siteName (exit code ${result.exitCode}, attempt $attempt/'
@@ -78,15 +97,29 @@ class Pantheon {
   /// installation") get written to stdout rather than stderr, and would
   /// otherwise get treated as if they were the real field value.
   Future<String> _runTerminus(List<String> args, String siteName) {
-    return _runTerminusWithRetry(args, siteName).then((result) {
-      if (result.exitCode != 0) {
-        stderr.writeln(
-            'Warning: `terminus ${args.join(' ')}` failed for $siteName '
-            '(exit code ${result.exitCode}). stderr:\n${result.stderr.toString().trim()}');
-        return '';
-      }
-      return result.stdout.toString().trim();
-    });
+    return _runTerminusWithRetry(args, siteName)
+        .then((result) => _outputOrWarn(result, args, siteName));
+  }
+
+  String _outputOrWarn(
+      ProcessResult result, List<String> args, String siteName) {
+    if (result.exitCode != 0) {
+      stderr.writeln(
+          'Warning: `terminus ${args.join(' ')}` failed for $siteName '
+          '(exit code ${result.exitCode}). stderr:\n${result.stderr.toString().trim()}');
+      return '';
+    }
+    return result.stdout.toString().trim();
+  }
+
+  /// True if [result] is WP-CLI reporting that there is no WordPress
+  /// installation at all. WP-CLI writes some errors to stdout rather than
+  /// stderr, so both are checked.
+  static bool _isMissingWordPress(ProcessResult result) {
+    if (result.exitCode == 0) return false;
+    const marker = 'This does not seem to be a WordPress installation';
+    return result.stderr.toString().contains(marker) ||
+        result.stdout.toString().contains(marker);
   }
 
   /// Get a list of the non-frozen, non-sandbox sites from Pantheon.
@@ -152,10 +185,21 @@ class Pantheon {
   /// Get the WordPress CMS version for the site. [url] should be provided
   /// for WordPress Multisite installs (see [fetchMultisitePrimaryDomain])
   /// where the site's own live URL may not resolve.
-  Future<String> fetchWordPressVersion(String siteName, {String? url}) {
+  ///
+  /// Throws [WordPressNotInstalledException] if the live environment has
+  /// no WordPress installation, so callers can tell that apart from an
+  /// ordinary failed fetch (which returns '').
+  Future<String> fetchWordPressVersion(String siteName, {String? url}) async {
     final args = ['wp', '-y', '$siteName.live', '--', 'core', 'version'];
     if (url != null && url.isNotEmpty) args.add('--url=$url');
-    return _runTerminus(args, siteName);
+
+    final result = await _runTerminusWithRetry(args, siteName);
+    if (_isMissingWordPress(result)) {
+      stderr.writeln('Warning: no WordPress installation found on the live '
+          'environment of $siteName; skipping WordPress checks.');
+      throw WordPressNotInstalledException(siteName);
+    }
+    return _outputOrWarn(result, args, siteName);
   }
 
   /// Get the information about the plugins for a WordPress site, or null

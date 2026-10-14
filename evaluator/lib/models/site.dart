@@ -59,6 +59,11 @@ class Site extends Model {
   /// failed fetch looking identical to "no plugins, all clear".
   bool pluginFetchFailed = false;
 
+  /// True if Pantheon lists this site as WordPress but its live
+  /// environment has no WordPress installation. Not serialized directly --
+  /// the evaluator turns this into a visible issue.
+  bool wordPressNotInstalled = false;
+
   /// Potential issues found on the site.
   List<SiteIssue> issues;
 
@@ -93,6 +98,9 @@ class Site extends Model {
 
   /// [newRelicStatus] for sites whose plan doesn't include New Relic.
   static const newRelicNotOnPlan = "Not included on this site's plan";
+
+  /// [cmsStability] for sites with no CMS installed on the live environment.
+  static const cmsNotInstalled = 'not installed';
 
   /// Return true if this site runs WordPress, in any of the framework
   /// variants Pantheon reports for it (e.g. `wordpress_network` for
